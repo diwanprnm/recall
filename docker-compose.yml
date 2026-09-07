@@ -1,0 +1,88 @@
+# ─── Recall — Local Development ─────────────────────────────────────────────
+# Usage:
+#   docker compose up -d            # start all services
+#   docker compose logs -f          # tail logs
+#   docker compose down             # stop & remove containers
+#   docker compose up -d --build    # rebuild images then start
+#
+# First time setup:
+#   1. Copy .env.example → .env              (root — for Docker build args)
+#   2. Copy recall-api/.env.example → recall-api/.env
+#   3. Copy recall-web/.env.example → recall-web/.env.local
+#   4. Fill in your Supabase & AI API keys in all .env files
+#   5. Run: docker compose up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ── PostgreSQL (local database) ────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: recall
+      POSTGRES_USER: recall
+      POSTGRES_PASSWORD: recall_dev_secret
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./recall-api/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recall"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Recall API (FastAPI backend) ───────────────────────────────────────────
+  recall-api:
+    build:
+      context: ./recall-api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./recall-api/.env
+    environment:
+      DATABASE_URL: postgresql://recall:recall_dev_secret@postgres:5432/recall
+      JWT_SECRET: dev-insecure-change-me
+      HOST: 0.0.0.0
+      PORT: 8000
+      ENVIRONMENT: development
+      DEBUG: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./recall-api/app:/app/app:ro
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir /app/app
+      --log-level info
+
+  # ── Recall Web (Next.js frontend) ──────────────────────────────────────────
+  recall-web:
+    build:
+      context: ./recall-web
+      dockerfile: Dockerfile
+      args:
+        # Rewrite destination baked into the standalone server at build time.
+        # Must be the Docker service name (not localhost) so the proxy reaches the API.
+        NEXT_PUBLIC_API_URL: http://recall-api:8000
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file:
+      - .env
+      - ./recall-web/.env.local
+    environment:
+      NEXT_PUBLIC_API_URL: http://recall-api:8000
+      NODE_ENV: development
+    depends_on:
+      - recall-api
+
+volumes:
+  pg_data:
