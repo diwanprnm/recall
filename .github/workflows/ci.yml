@@ -78,7 +78,7 @@ jobs:
                   ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
                   ssh -i ~/.ssh/key "$VPS_USER@$VPS_HOST" '
                     set -e
-                    cd ~/recall
+                    cd /var/www/my-app/recall
                     git pull --ff-only
                     git submodule update --init --recursive
                     docker compose -f docker-compose.prod.yml up -d --build
