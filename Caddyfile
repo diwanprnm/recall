@@ -1,0 +1,12 @@
+# Domain dibaca dari env (di-set lewat docker-compose.prod.yml → .env root VPS).
+# Caddy urus TLS otomatis (Let's Encrypt) selama port 80 reachable dari internet.
+
+{$APP_DOMAIN} {
+	reverse_proxy recall-web:3001
+}
+
+{$API_DOMAIN} {
+	reverse_proxy recall-api:8000
+}
+
+</content>

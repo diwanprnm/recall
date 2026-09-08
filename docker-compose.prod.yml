@@ -1,0 +1,81 @@
+# ─── Recall — Production (VPS) ─────────────────────────────────────────────
+# Deploy: docker compose -f docker-compose.prod.yml up -d --build
+# Butuh .env di root repo (isi POSTGRES_PASSWORD, APP_DOMAIN, API_DOMAIN,
+# NEXT_PUBLIC_API_URL) dan recall-api/.env + recall-web/.env.local di VPS.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    # tanpa ports — tidak expose DB ke internet.
+    # akses manual: docker compose -f docker-compose.prod.yml exec postgres psql -U recall
+    environment:
+      POSTGRES_DB: recall
+      POSTGRES_USER: recall
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      # migrations auto-load HANYA saat volume kosong (first run).
+      # ponytail: migration baru harus dijalankan manual (psql -f). Ganti ke Alembic saat rilis makin sering.
+      - ./recall-api/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recall"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  recall-api:
+    build: ./recall-api
+    restart: unless-stopped
+    # tanpa ports — hanya reachable via docker network dari caddy
+    env_file:
+      - ./recall-api/.env
+    environment:
+      DATABASE_URL: postgresql://recall:${POSTGRES_PASSWORD}@postgres:5432/recall
+      ENVIRONMENT: production
+      DEBUG: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # tanpa --reload / volume mount — image sudah final (CMD di Dockerfile)
+
+  recall-web:
+    build:
+      context: ./recall-web
+      args:
+        # URL API yang dicapai browser/rewrite. Isi di .env root VPS.
+        # Contoh: https://api.domainkamu.com
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    restart: unless-stopped
+    env_file:
+      - ./recall-web/.env.local
+    environment:
+      NODE_ENV: production
+    depends_on:
+      - recall-api
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    # satu-satunya pintu masuk dari internet; TLS otomatis via Let's Encrypt
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # sertifikat TLS — jangan hilang
+      - caddy_config:/config
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+    depends_on:
+      - recall-api
+      - recall-web
+
+volumes:
+  pg_data:
+  caddy_data:
+  caddy_config:
+
+</content>
